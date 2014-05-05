@@ -442,7 +442,7 @@ public class BLUNOActivity extends BlunoLibrary {
 		System.out.println("BLUNOActivity onCreate");
 		setContentView(R.layout.activity_bluno);
 		
-		//set the Baudrate of the 
+		//set the Baudrate of the Serial port
 		serialBegin(115200);
 		
         onCreateProcess();

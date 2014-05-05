@@ -5,6 +5,7 @@ import java.util.List;
 
 import android.os.Handler;
 import android.os.IBinder;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
@@ -48,16 +49,17 @@ public abstract  class BlunoLibrary  extends Activity{
 	}
 	
 	private int mBaudrate=115200;	//set the default baud rate to 115200
-
-	byte[] mBaudrateBuffer={0x32,0x00,(byte) (mBaudrate & 0xFF),(byte) ((mBaudrate>>8) & 0xFF),(byte) ((mBaudrate>>16) & 0xFF),0x00};;
+	private String mPassword="AT+PASSWOR=DFRobot\r\n";
+	
+	
+	private String mBaudrateBuffer = "AT+CURRUART="+mBaudrate+"\r\n";
+	
+//	byte[] mBaudrateBuffer={0x32,0x00,(byte) (mBaudrate & 0xFF),(byte) ((mBaudrate>>8) & 0xFF),(byte) ((mBaudrate>>16) & 0xFF),0x00};;
 	
 	
 	public void serialBegin(int baud){
 		mBaudrate=baud;
-		mBaudrateBuffer[2]=(byte) (mBaudrate & 0xFF);
-		mBaudrateBuffer[3]=(byte) ((mBaudrate>>8) & 0xFF);
-		mBaudrateBuffer[4]=(byte) ((mBaudrate>>16) & 0xFF);
-
+		mBaudrateBuffer = "AT+CURRUART="+mBaudrate+"\r\n";
 	}
 	
 	
@@ -75,7 +77,7 @@ public abstract  class BlunoLibrary  extends Activity{
 	AlertDialog mScanDeviceDialog;
     private String mDeviceName;
     private String mDeviceAddress;
-	public enum connectionStateEnum{isNull, isScanning, isToScan, isConnecting , isConnected};
+	public enum connectionStateEnum{isNull, isScanning, isToScan, isConnecting , isConnected, isDisconnecting};
 	public connectionStateEnum mConnectionState = connectionStateEnum.isNull;
 	private static final int REQUEST_ENABLE_BT = 1;
 
@@ -85,13 +87,24 @@ public abstract  class BlunoLibrary  extends Activity{
 
     private final static String TAG = BlunoLibrary.class.getSimpleName();
 
-    private Runnable mRunnable=new Runnable(){
+    private Runnable mConnectingOverTimeRunnable=new Runnable(){
 
 		@Override
 		public void run() {
         	if(mConnectionState==connectionStateEnum.isConnecting)
 			mConnectionState=connectionStateEnum.isToScan;
 			onConectionStateChange(mConnectionState);
+			mBluetoothLeService.close();
+		}};
+		
+    private Runnable mDisonnectingOverTimeRunnable=new Runnable(){
+
+		@Override
+		public void run() {
+        	if(mConnectionState==connectionStateEnum.isDisconnecting)
+			mConnectionState=connectionStateEnum.isToScan;
+			onConectionStateChange(mConnectionState);
+			mBluetoothLeService.close();
 		}};
     
 	public static final String SerialPortUUID="0000dfb1-0000-1000-8000-00805f9b34fb";
@@ -141,7 +154,7 @@ public abstract  class BlunoLibrary  extends Activity{
 				        Log.d(TAG, "Connect request success");
 			        	mConnectionState=connectionStateEnum.isConnecting;
 			        	onConectionStateChange(mConnectionState);
-			            mHandler.postDelayed(mRunnable, 10000);
+			            mHandler.postDelayed(mConnectingOverTimeRunnable, 10000);
 		        	}
 			        else {
 				        Log.d(TAG, "Connect request fail");
@@ -200,6 +213,8 @@ public abstract  class BlunoLibrary  extends Activity{
 		if(mBluetoothLeService!=null)
 		{
 			mBluetoothLeService.disconnect();
+            mHandler.postDelayed(mDisonnectingOverTimeRunnable, 10000);
+
 //			mBluetoothLeService.close();
 		}
 		mSCharacteristic=null;
@@ -211,8 +226,10 @@ public abstract  class BlunoLibrary  extends Activity{
 		System.out.println("MiUnoActivity onStop");
 		if(mBluetoothLeService!=null)
 		{
-			mBluetoothLeService.disconnect();
-//			mBluetoothLeService.close();
+//			mBluetoothLeService.disconnect();
+//            mHandler.postDelayed(mDisonnectingOverTimeRunnable, 10000);
+        	mHandler.removeCallbacks(mDisonnectingOverTimeRunnable);
+			mBluetoothLeService.close();
 		}
 		mSCharacteristic=null;
 	}
@@ -261,18 +278,21 @@ public abstract  class BlunoLibrary  extends Activity{
     // ACTION_DATA_AVAILABLE: received data from the device.  This can be a result of read
     //                        or notification operations.
     private final BroadcastReceiver mGattUpdateReceiver = new BroadcastReceiver() {
-        @Override
+        @SuppressLint("DefaultLocale")
+		@Override
         public void onReceive(Context context, Intent intent) {
         	final String action = intent.getAction();
             System.out.println("mGattUpdateReceiver->onReceive->action="+action);
             if (BluetoothLeService.ACTION_GATT_CONNECTED.equals(action)) {
                 mConnected = true;
-            	mHandler.removeCallbacks(mRunnable);
+            	mHandler.removeCallbacks(mConnectingOverTimeRunnable);
 
             } else if (BluetoothLeService.ACTION_GATT_DISCONNECTED.equals(action)) {
                 mConnected = false;
                 mConnectionState = connectionStateEnum.isToScan;
                 onConectionStateChange(mConnectionState);
+            	mHandler.removeCallbacks(mDisonnectingOverTimeRunnable);
+            	mBluetoothLeService.close();
             } else if (BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
                 // Show all the supported services and characteristics on the user interface.
             	for (BluetoothGattService gattService : mBluetoothLeService.getSupportedGattServices()) {
@@ -283,9 +303,11 @@ public abstract  class BlunoLibrary  extends Activity{
             } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
             	if(mSCharacteristic==mModelNumberCharacteristic)
             	{
-            		if (intent.getStringExtra(BluetoothLeService.EXTRA_DATA).startsWith("DF BLuno")) {
+            		if (intent.getStringExtra(BluetoothLeService.EXTRA_DATA).toUpperCase().startsWith("DF BLUNO")) {
 						mBluetoothLeService.setCharacteristicNotification(mSCharacteristic, false);
 						mSCharacteristic=mCommandCharacteristic;
+						mSCharacteristic.setValue(mPassword);
+						mBluetoothLeService.writeCharacteristic(mSCharacteristic);
 						mSCharacteristic.setValue(mBaudrateBuffer);
 						mBluetoothLeService.writeCharacteristic(mSCharacteristic);
 						mSCharacteristic=mSerialPortCharacteristic;
@@ -318,26 +340,43 @@ public abstract  class BlunoLibrary  extends Activity{
 	
     void buttonScanOnClickProcess()
     {
-		if(mConnectionState==connectionStateEnum.isConnecting){
-			
-			
-
-			
-
-		}
-		else if (mConnectionState==connectionStateEnum.isToScan || mConnectionState==connectionStateEnum.isNull) {
+    	switch (mConnectionState) {
+		case isNull:
 			mConnectionState=connectionStateEnum.isScanning;
 			onConectionStateChange(mConnectionState);
 			scanLeDevice(true);
 			mScanDeviceDialog.show();
-		}
-		else{	
-			mBluetoothLeService.disconnect();
-//			mBluetoothLeService.close();
-			mConnectionState=connectionStateEnum.isToScan;
+			break;
+		case isToScan:
+			mConnectionState=connectionStateEnum.isScanning;
 			onConectionStateChange(mConnectionState);
+			scanLeDevice(true);
+			mScanDeviceDialog.show();
+			break;
+		case isScanning:
+			
+			break;
 
+		case isConnecting:
+			
+			break;
+		case isConnected:
+			mBluetoothLeService.disconnect();
+            mHandler.postDelayed(mDisonnectingOverTimeRunnable, 10000);
+
+//			mBluetoothLeService.close();
+			mConnectionState=connectionStateEnum.isDisconnecting;
+			onConectionStateChange(mConnectionState);
+			break;
+		case isDisconnecting:
+			
+			break;
+
+		default:
+			break;
 		}
+    	
+    	
     }
     
 	void scanLeDevice(final boolean enable) {

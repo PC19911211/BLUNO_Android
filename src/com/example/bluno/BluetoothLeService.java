@@ -45,7 +45,7 @@ public class BluetoothLeService extends Service {
 
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
-    private BluetoothGatt mBluetoothGatt;
+    BluetoothGatt mBluetoothGatt;
     public String mBluetoothDeviceAddress;
     
     private static final int STATE_DISCONNECTED = 0;
@@ -116,7 +116,6 @@ public class BluetoothLeService extends Service {
                 mConnectionState = STATE_DISCONNECTED;
                 Log.i(TAG, "Disconnected from GATT server.");
                 broadcastUpdate(intentAction);
-                close();
             }
         }
 
@@ -430,6 +429,8 @@ public class BluetoothLeService extends Service {
      */
     public void disconnect() {
     	System.out.println("BluetoothLeService disconnect");
+		mCharacteristicRingBuffer.clear();
+
         if (mBluetoothAdapter == null || mBluetoothGatt == null) {
             Log.w(TAG, "BluetoothAdapter not initialized");
             return;
@@ -443,6 +444,8 @@ public class BluetoothLeService extends Service {
      */
     public void close() {
     	System.out.println("BluetoothLeService close");
+		mCharacteristicRingBuffer.clear();
+
         if (mBluetoothGatt == null) {
             return;
         }
